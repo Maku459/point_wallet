@@ -131,6 +131,7 @@ button { font: inherit; color: inherit; }
 }
 
 .app-header__title { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.app-header__logo { border-radius: 7px; display: block; }
 .app-header__title h1 {
   font-size: 17px;
   font-weight: 700;
