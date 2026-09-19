@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { test, describe } from 'node:test';
 import {
+  BACKUP_STALE_DAYS,
+  backupAgeLabel,
+  daysSince,
   daysUntil,
+  formatBytes,
+  isBackupStale,
   expiryLabel,
   filterEntries,
   formatDate,
@@ -188,5 +193,42 @@ describe('集計', () => {
   test('upcomingExpirations は失効済みを含めず期限順に返す', () => {
     const list = upcomingExpirations(entries, TODAY, 30);
     assert.deepEqual(list.map((e) => e.id), ['1']);
+  });
+});
+
+describe('保存状態の表示', () => {
+  const NOW = new Date('2026-09-19T12:00:00.000Z');
+
+  test('formatBytes は単位を切り替える', () => {
+    assert.equal(formatBytes(0), '0 B');
+    assert.equal(formatBytes(999), '999 B');
+    assert.equal(formatBytes(1024), '1.0 KB');
+    assert.equal(formatBytes(1024 * 1024), '1.0 MB');
+    assert.equal(formatBytes(20 * 1024 * 1024), '20 MB');
+    assert.equal(formatBytes(1024 ** 3), '1.0 GB');
+    assert.equal(formatBytes(null), '—');
+    assert.equal(formatBytes(-1), '—');
+  });
+
+  test('daysSince は経過日数を返す', () => {
+    assert.equal(daysSince('2026-09-19T00:00:00.000Z', NOW), 0);
+    assert.equal(daysSince('2026-09-05T12:00:00.000Z', NOW), 14);
+    assert.equal(daysSince('', NOW), null);
+    assert.equal(daysSince('こわれた日付', NOW), null);
+  });
+
+  test('isBackupStale は登録があり期間が空いたときだけ true', () => {
+    assert.equal(isBackupStale('', 0, NOW), false, 'データが無ければ促さない');
+    assert.equal(isBackupStale('', 3, NOW), true, '一度も取得していなければ促す');
+    assert.equal(isBackupStale('2026-09-18T00:00:00.000Z', 3, NOW), false);
+    const stale = new Date(NOW.getTime() - BACKUP_STALE_DAYS * 86400000).toISOString();
+    assert.equal(isBackupStale(stale, 3, NOW), true, `${BACKUP_STALE_DAYS}日で促す`);
+  });
+
+  test('backupAgeLabel は経過を文言にする', () => {
+    assert.equal(backupAgeLabel('', NOW), 'まだ取得していません');
+    assert.equal(backupAgeLabel('2026-09-19T01:00:00.000Z', NOW), '今日');
+    assert.equal(backupAgeLabel('2026-09-18T10:00:00.000Z', NOW), '昨日');
+    assert.equal(backupAgeLabel('2026-09-09T12:00:00.000Z', NOW), '10日前');
   });
 });

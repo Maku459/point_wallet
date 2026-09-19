@@ -2,14 +2,18 @@
  * 画面の組み立てと操作。ユーザー入力は textContent 経由で描画し、HTML を組み立てない。
  */
 import {
+  BACKUP_STALE_DAYS,
   DANGER_DAYS,
   STATUS_LABELS,
   UNITS,
   WARN_DAYS,
+  backupAgeLabel,
   expiryLabel,
   filterEntries,
+  formatBytes,
   formatDate,
   formatNumber,
+  isBackupStale,
   sortEntries,
   statusOf,
   summarize,
@@ -20,6 +24,7 @@ import {
 import {
   appendEntries,
   buildBackup,
+  getBackend,
   loadEntries,
   loadSettings,
   mergeEntries,
@@ -27,6 +32,16 @@ import {
   saveEntries,
   saveSettings,
 } from './store.js';
+import {
+  chooseBackupFile,
+  clearBackupHandle,
+  getBackupHandle,
+  requestPersistence,
+  storageStatus,
+  supportsFileBackup,
+  verifyBackupPermission,
+  writeBackupFile,
+} from './db.js';
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -54,6 +69,15 @@ const el = {
   confirmText: $('#confirm-text'),
   confirmOk: $('#confirm-ok'),
   confirmCancel: $('#confirm-cancel'),
+  storageDialog: $('#storage-dialog'),
+  statusBackend: $('#status-backend'),
+  statusPersist: $('#status-persist'),
+  statusUsage: $('#status-usage'),
+  statusBackup: $('#status-backup'),
+  persistButton: $('#persist-button'),
+  autoBackupText: $('#autobackup-text'),
+  autoBackupSet: $('#autobackup-set'),
+  autoBackupClear: $('#autobackup-clear'),
   menuButton: $('#menu-button'),
   menuPanel: $('#menu-panel'),
   themeToggle: $('#theme-toggle'),
@@ -65,21 +89,202 @@ const el = {
   categorySuggestions: $('#category-suggestions'),
 };
 
-let entries = loadEntries();
+let entries = [];
 let settings = loadSettings();
 let toastTimer = 0;
 
 /* ---------------- 保存 ---------------- */
 
-function persist() {
-  if (!saveEntries(entries)) {
+let persistenceRequested = false;
+
+/** 変更を保存し、必要なら永続化の要求と自動バックアップを行う */
+async function persist() {
+  const result = await saveEntries(entries);
+  if (!result.ok) {
     showToast('保存に失敗しました。ブラウザの空き容量をご確認ください');
+    return false;
+  }
+  void ensurePersistence();
+  scheduleAutoBackup();
+  return true;
+}
+
+/**
+ * ブラウザに自動削除されないよう要求する。
+ * 利用者の操作をきっかけに一度だけ行う（Chrome は条件を満たせば無確認で許可される）。
+ */
+async function ensurePersistence() {
+  if (persistenceRequested) return;
+  persistenceRequested = true;
+  const { supported, persisted } = await requestPersistence();
+  if (supported && persisted && !settings.persistNoticeShown) {
+    updateSettings({ persistNoticeShown: true });
+    showToast('データの永続化が有効になりました');
   }
 }
 
 function updateSettings(patch) {
   settings = { ...settings, ...patch };
   saveSettings(settings);
+}
+
+/* ---------------- ファイルへの自動バックアップ ---------------- */
+
+let backupHandle = null;
+let backupNeedsPermission = false;
+let backupTimer = 0;
+
+async function initAutoBackup() {
+  backupHandle = await getBackupHandle();
+  if (backupHandle) backupNeedsPermission = !(await verifyBackupPermission(backupHandle, false));
+}
+
+function scheduleAutoBackup() {
+  if (!backupHandle || backupNeedsPermission) return;
+  clearTimeout(backupTimer);
+  backupTimer = setTimeout(runAutoBackup, 800);
+}
+
+async function runAutoBackup() {
+  if (!backupHandle) return false;
+  try {
+    if (!(await verifyBackupPermission(backupHandle, false))) {
+      backupNeedsPermission = true;
+      return false;
+    }
+    await writeBackupFile(backupHandle, buildBackup(entries));
+    updateSettings({ lastBackupAt: new Date().toISOString() });
+    return true;
+  } catch (err) {
+    console.warn('自動バックアップに失敗しました', err);
+    return false;
+  }
+}
+
+async function setupAutoBackup() {
+  if (!supportsFileBackup()) {
+    showToast('このブラウザはファイルへの自動保存に対応していません');
+    return;
+  }
+  try {
+    backupHandle = await chooseBackupFile(`point-wallet-${toISODate()}.json`);
+    backupNeedsPermission = false;
+    const written = await runAutoBackup();
+    showToast(written ? '自動バックアップを設定しました' : '保存先を設定しましたが書き込めませんでした');
+  } catch (err) {
+    if (err && err.name !== 'AbortError') {
+      console.warn('自動バックアップの設定に失敗しました', err);
+      showToast('保存先を設定できませんでした');
+    }
+  }
+  await refreshStorageDialog();
+}
+
+async function removeAutoBackup() {
+  try {
+    await clearBackupHandle();
+  } catch (err) {
+    console.warn('自動バックアップの解除に失敗しました', err);
+  }
+  backupHandle = null;
+  backupNeedsPermission = false;
+  showToast('自動バックアップを解除しました');
+  await refreshStorageDialog();
+}
+
+/* ---------------- 保存状態ダイアログ ---------------- */
+
+const BACKEND_LABEL = {
+  indexeddb: 'IndexedDB（ブラウザ内）',
+  localstorage: 'localStorage（予備）',
+  none: '保存できません',
+};
+
+function setStatus(node, text, className) {
+  node.replaceChildren();
+  const span = createEl('span', className, text);
+  node.append(span);
+}
+
+async function refreshStorageDialog() {
+  if (!el.storageDialog.open) return;
+
+  setStatus(el.statusBackend, BACKEND_LABEL[getBackend()] || '—', getBackend() === 'none' ? 'off' : 'ok');
+
+  const status = await storageStatus();
+  if (!status.supported) {
+    setStatus(el.statusPersist, 'この環境では設定できません');
+    el.persistButton.hidden = true;
+  } else if (status.persisted) {
+    setStatus(el.statusPersist, '有効（自動削除されません）', 'ok');
+    el.persistButton.hidden = true;
+  } else {
+    setStatus(el.statusPersist, 'ブラウザに任せています', 'off');
+    el.persistButton.hidden = false;
+  }
+
+  el.statusUsage.textContent =
+    status.usage === null
+      ? '—'
+      : status.quota
+        ? `${formatBytes(status.usage)} / ${formatBytes(status.quota)}`
+        : formatBytes(status.usage);
+
+  setStatus(
+    el.statusBackup,
+    backupAgeLabel(settings.lastBackupAt),
+    isBackupStale(settings.lastBackupAt, entries.length) ? 'off' : 'ok',
+  );
+
+  if (!supportsFileBackup()) {
+    el.autoBackupText.textContent =
+      'このブラウザは対応していません（パソコンの Chrome / Edge で利用できます）。メニューの「バックアップを書き出す」をご利用ください。';
+    el.autoBackupSet.hidden = true;
+    el.autoBackupClear.hidden = true;
+    return;
+  }
+
+  el.autoBackupSet.hidden = false;
+  if (!backupHandle) {
+    el.autoBackupText.textContent = '保存先ファイルを決めておくと、登録・編集のたびに自動で書き出します。';
+    el.autoBackupSet.textContent = '保存先ファイルを選ぶ';
+    el.autoBackupClear.hidden = true;
+  } else if (backupNeedsPermission) {
+    el.autoBackupText.textContent = `保存先：${backupHandle.name}（書き込みの許可が切れています）`;
+    el.autoBackupSet.textContent = '許可しなおす';
+    el.autoBackupClear.hidden = false;
+  } else {
+    el.autoBackupText.textContent = `保存先：${backupHandle.name}（変更のたびに自動で保存します）`;
+    el.autoBackupSet.textContent = '保存先を変更';
+    el.autoBackupClear.hidden = false;
+  }
+}
+
+async function openStorageDialog() {
+  el.storageDialog.showModal();
+  await refreshStorageDialog();
+}
+
+async function requestPersistenceFromDialog() {
+  const { supported, persisted } = await requestPersistence();
+  persistenceRequested = true;
+  if (!supported) showToast('この環境では設定できません');
+  else if (persisted) showToast('データの永続化が有効になりました');
+  else showToast('ブラウザに許可されませんでした。ホーム画面に追加すると有効になりやすくなります');
+  await refreshStorageDialog();
+}
+
+async function reauthorizeBackup() {
+  if (backupHandle && backupNeedsPermission) {
+    if (await verifyBackupPermission(backupHandle, true)) {
+      backupNeedsPermission = false;
+      await runAutoBackup();
+      showToast('自動バックアップを再開しました');
+      await refreshStorageDialog();
+      return;
+    }
+  }
+  await setupAutoBackup();
 }
 
 /* ---------------- 表示 ---------------- */
@@ -320,7 +525,7 @@ function addMonths(base, months) {
   return date;
 }
 
-function handleSubmit(event) {
+async function handleSubmit(event) {
   event.preventDefault();
   clearErrors();
 
@@ -345,10 +550,9 @@ function handleSubmit(event) {
   } else {
     entries.push(entry);
   }
-  persist();
   render();
   el.dialog.close();
-  showToast(index >= 0 ? '更新しました' : '登録しました');
+  if (await persist()) showToast(index >= 0 ? '更新しました' : '登録しました');
 }
 
 async function deleteCurrent() {
@@ -360,15 +564,15 @@ async function deleteCurrent() {
 
   const backup = [...entries];
   entries = entries.filter((entry) => entry.id !== id);
-  persist();
   render();
   el.dialog.close();
+  await persist();
   showToast('削除しました', {
     label: '元に戻す',
-    onClick: () => {
+    onClick: async () => {
       entries = backup;
-      persist();
       render();
+      await persist();
       showToast('削除を取り消しました');
     },
   });
@@ -388,6 +592,7 @@ function exportBackup() {
   link.download = `point-wallet-${toISODate()}.json`;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+  updateSettings({ lastBackupAt: new Date().toISOString() });
   showToast('バックアップを書き出しました');
 }
 
@@ -416,8 +621,8 @@ async function importBackup(file) {
   }
 
   entries = merged.entries;
-  persist();
   render();
+  await persist();
   showToast(`読み込み完了：追加 ${merged.added} 件 / 更新 ${merged.updated} 件`);
 }
 
@@ -432,12 +637,12 @@ async function clearAll() {
   );
   if (!ok) return;
   entries = [];
-  persist();
   render();
+  await persist();
   showToast('すべて削除しました');
 }
 
-function addSampleData() {
+async function addSampleData() {
   const today = new Date();
   const iso = (months) => toISODate(addMonths(today, months));
   const samples = [
@@ -450,8 +655,8 @@ function addSampleData() {
     const result = validateEntry(sample);
     if (result.ok) entries.push(result.entry);
   }
-  persist();
   render();
+  await persist();
   showToast('サンプルデータを追加しました');
 }
 
@@ -491,6 +696,7 @@ async function enableNotifications() {
   }
   if (settings.notify) {
     updateSettings({ notify: false });
+    syncNotifyLabel();
     showToast('失効前の通知をオフにしました');
     return;
   }
@@ -500,6 +706,7 @@ async function enableNotifications() {
     return;
   }
   updateSettings({ notify: true });
+  syncNotifyLabel();
   showToast('アプリを開いたときに、失効が近いポイントをお知らせします');
   notifyUpcoming();
 }
@@ -539,6 +746,7 @@ function toggleMenu(force) {
 }
 
 const menuActions = {
+  storage: openStorageDialog,
   export: exportBackup,
   import: () => el.importFile.click(),
   notify: enableNotifications,
@@ -563,6 +771,13 @@ el.deleteButton.addEventListener('click', deleteCurrent);
 for (const button of el.dialog.querySelectorAll('[data-close]')) {
   button.addEventListener('click', () => el.dialog.close());
 }
+for (const button of el.storageDialog.querySelectorAll('[data-close-storage]')) {
+  button.addEventListener('click', () => el.storageDialog.close());
+}
+el.persistButton.addEventListener('click', requestPersistenceFromDialog);
+el.autoBackupSet.addEventListener('click', reauthorizeBackup);
+el.autoBackupClear.addEventListener('click', removeAutoBackup);
+
 el.noExpiry.addEventListener('change', syncExpiryDisabled);
 $('#expiry-presets').addEventListener('click', (event) => {
   const chip = event.target.closest('.chip');
@@ -618,15 +833,27 @@ document.addEventListener('visibilitychange', () => {
 
 /* ---------------- 起動 ---------------- */
 
-applyTheme();
-syncNotifyLabel();
-render();
-notifyUpcoming();
+async function main() {
+  applyTheme();
+  syncNotifyLabel();
 
-const notifyButton = el.menuPanel.querySelector('[data-action="notify"]');
-if (notifyButton) {
-  el.menuPanel.addEventListener('click', () => setTimeout(syncNotifyLabel, 0));
+  entries = await loadEntries();
+  render();
+  document.body.dataset.ready = 'true';
+
+  notifyUpcoming();
+  await initAutoBackup();
+
+  if (getBackend() === 'none') {
+    showToast('このブラウザではデータを保存できません（プライベートモードの可能性があります）');
+  } else if (backupNeedsPermission) {
+    showToast('自動バックアップの許可が切れています', { label: '再設定', onClick: openStorageDialog });
+  } else if (isBackupStale(settings.lastBackupAt, entries.length)) {
+    showToast(`${BACKUP_STALE_DAYS}日以上バックアップしていません`, { label: '書き出す', onClick: exportBackup });
+  }
 }
+
+main();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {

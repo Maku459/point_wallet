@@ -1,11 +1,16 @@
 /**
- * localStorage へのデータ永続化と、JSON によるバックアップ／復元。
- * 端末内にのみ保存し、外部にデータを送信することはない。
+ * データの保存と取り出し。
+ *
+ * 保存先は IndexedDB を主とし、同じ内容を localStorage にも複製する。
+ * どちらか一方が失われても復旧でき、IndexedDB が使えない環境では
+ * localStorage だけで動作を継続する。
  */
 import { sanitizeEntry, uid } from './core.js';
+import { openDB, readAll, replaceAll, getMeta, setMeta } from './db.js';
 
 const STORAGE_KEY = 'point-wallet:entries:v1';
 const SETTINGS_KEY = 'point-wallet:settings:v1';
+const MIGRATED_KEY = 'legacyMigrated';
 export const EXPORT_FORMAT = 'point-wallet-backup';
 
 const defaultSettings = {
@@ -14,7 +19,15 @@ const defaultSettings = {
   unit: 'all',
   theme: 'auto',
   notify: false,
+  lastBackupAt: '',
+  persistNoticeShown: false,
 };
+
+/** 実際に使われている保存先。'indexeddb' | 'localstorage' | 'none' */
+let backend = 'none';
+export const getBackend = () => backend;
+
+/* ---------------- localStorage（予備・冗長コピー） ---------------- */
 
 function readJSON(key, fallback) {
   try {
@@ -32,20 +45,90 @@ function writeJSON(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
     return true;
   } catch (err) {
-    console.error('保存に失敗しました', err);
+    console.warn('localStorage への保存に失敗しました', err);
     return false;
   }
 }
 
-export function loadEntries() {
+/** localStorage の複製が最新でなければ書き直す（片方が失われても復旧できるように） */
+function refreshMirror(entries) {
+  try {
+    const next = JSON.stringify(entries);
+    if (localStorage.getItem(STORAGE_KEY) !== next) localStorage.setItem(STORAGE_KEY, next);
+  } catch (err) {
+    console.warn('localStorage への複製に失敗しました', err);
+  }
+}
+
+function readLocalEntries() {
   const raw = readJSON(STORAGE_KEY, []);
   if (!Array.isArray(raw)) return [];
   return raw.map(sanitizeEntry).filter(Boolean);
 }
 
-export function saveEntries(entries) {
-  return writeJSON(STORAGE_KEY, entries);
+/* ---------------- 読み込み ---------------- */
+
+/**
+ * 保存済みのポイントを読み出す。
+ * 旧バージョン（localStorage のみ）のデータは初回に IndexedDB へ移行する。
+ */
+export async function loadEntries() {
+  try {
+    await openDB();
+    const rows = await readAll();
+    backend = 'indexeddb';
+
+    const migrated = await getMeta(MIGRATED_KEY).catch(() => undefined);
+    if (!migrated) {
+      // 移行は一度だけ。以降は IndexedDB を唯一の正とし、削除が復活しないようにする
+      const legacy = readLocalEntries();
+      const known = new Set(rows.map((row) => row && row.id));
+      const missing = legacy.filter((entry) => !known.has(entry.id));
+      await setMeta(MIGRATED_KEY, new Date().toISOString());
+      if (missing.length > 0) {
+        const merged = [...rows.map(sanitizeEntry).filter(Boolean), ...missing];
+        await replaceAll(merged);
+        refreshMirror(merged);
+        return merged;
+      }
+    }
+
+    const loaded = rows.map(sanitizeEntry).filter(Boolean);
+    refreshMirror(loaded);
+    return loaded;
+  } catch (err) {
+    console.warn('IndexedDB を利用できないため localStorage を使います', err);
+    backend = typeof localStorage !== 'undefined' ? 'localstorage' : 'none';
+    return readLocalEntries();
+  }
 }
+
+/* ---------------- 保存 ---------------- */
+
+/**
+ * ポイントを保存する。IndexedDB と localStorage の両方へ書き込み、
+ * 少なくとも一方が成功すれば成功とみなす。
+ * @returns {Promise<{ok: boolean, backend: string, mirrored: boolean}>}
+ */
+export async function saveEntries(entries) {
+  let stored = false;
+  try {
+    await replaceAll(entries);
+    backend = 'indexeddb';
+    stored = true;
+  } catch (err) {
+    console.warn('IndexedDB への保存に失敗しました', err);
+    if (backend === 'indexeddb') backend = 'localstorage';
+  }
+
+  // 冗長コピー。容量超過などで失敗しても IndexedDB が成功していれば問題ない
+  const mirrored = writeJSON(STORAGE_KEY, entries);
+  if (!stored && mirrored) backend = 'localstorage';
+
+  return { ok: stored || mirrored, backend, mirrored };
+}
+
+/* ---------------- 設定 ---------------- */
 
 export function loadSettings() {
   return { ...defaultSettings, ...readJSON(SETTINGS_KEY, {}) };
@@ -54,6 +137,8 @@ export function loadSettings() {
 export function saveSettings(settings) {
   return writeJSON(SETTINGS_KEY, { ...defaultSettings, ...settings });
 }
+
+/* ---------------- バックアップ ---------------- */
 
 /** バックアップ用の JSON 文字列を作る */
 export function buildBackup(entries) {
@@ -99,7 +184,6 @@ export function mergeEntries(current, incoming) {
   for (const entry of incoming) {
     const existing = byId.get(entry.id);
     if (!existing) {
-      // 別端末由来などで id が衝突しないよう、未知の id はそのまま採用する
       byId.set(entry.id, entry);
       added += 1;
       continue;

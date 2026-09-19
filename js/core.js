@@ -239,3 +239,45 @@ export function upcomingExpirations(entries, today = toISODate(), withinDays = W
     'expiry',
   );
 }
+
+/** バックアップを促すまでの日数 */
+export const BACKUP_STALE_DAYS = 14;
+
+/** バイト数を読みやすい単位にする */
+export function formatBytes(bytes) {
+  // 不明な値を 0 と表示しないよう、数値以外は一律で「—」にする
+  if (!Number.isFinite(bytes) || bytes < 0) return '—';
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let value = bytes / 1024;
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[index]}`;
+}
+
+/** ISO 文字列から現在までの経過日数。未設定・不正なら null */
+export function daysSince(isoString, now = new Date()) {
+  if (!isoString) return null;
+  const then = new Date(isoString);
+  if (Number.isNaN(then.getTime())) return null;
+  return Math.floor((now.getTime() - then.getTime()) / (24 * 60 * 60 * 1000));
+}
+
+/** バックアップを促すべきか（データがあり、一度も取っていないか古い場合） */
+export function isBackupStale(lastBackupAt, entryCount, now = new Date()) {
+  if (entryCount <= 0) return false;
+  const days = daysSince(lastBackupAt, now);
+  return days === null || days >= BACKUP_STALE_DAYS;
+}
+
+/** 経過日数を文言にする */
+export function backupAgeLabel(lastBackupAt, now = new Date()) {
+  const days = daysSince(lastBackupAt, now);
+  if (days === null) return 'まだ取得していません';
+  if (days <= 0) return '今日';
+  if (days === 1) return '昨日';
+  return `${days}日前`;
+}
