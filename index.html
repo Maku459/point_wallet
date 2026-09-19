@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ポイントウォレット</title>
+<meta name="description" content="各サイトのポイント数と有効期限を手動で登録して管理するPWAアプリ。データは端末内だけに保存されます。">
+<meta name="theme-color" content="#6366f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111827" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ポイント">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<a class="skip-link" href="#entry-list">一覧へスキップ</a>
+
+<header class="app-header">
+  <div class="app-header__title">
+    <img src="icons/icon.svg" alt="" width="28" height="28" aria-hidden="true">
+    <h1>ポイントウォレット</h1>
+  </div>
+  <div class="app-header__actions">
+    <button type="button" id="theme-toggle" class="icon-button" aria-label="テーマを切り替える" title="テーマを切り替える">
+      <span id="theme-icon" aria-hidden="true">◐</span>
+    </button>
+    <div class="menu-wrap">
+      <button type="button" id="menu-button" class="icon-button" aria-haspopup="true" aria-expanded="false" aria-controls="menu-panel" aria-label="メニュー">
+        <span aria-hidden="true">⋮</span>
+      </button>
+      <div id="menu-panel" class="menu-panel" role="menu" hidden>
+        <button type="button" role="menuitem" data-action="storage">データの保存状態</button>
+        <button type="button" role="menuitem" data-action="export">バックアップを書き出す</button>
+        <button type="button" role="menuitem" data-action="import">バックアップを読み込む</button>
+        <button type="button" role="menuitem" data-action="notify">失効前の通知を有効にする</button>
+        <button type="button" role="menuitem" data-action="sample">サンプルデータを入れる</button>
+        <button type="button" role="menuitem" data-action="clear" class="is-danger">すべてのデータを削除</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="app-main">
+  <section class="summary" aria-label="サマリー">
+    <div class="summary__card">
+      <p class="summary__label">保有ポイント合計</p>
+      <p class="summary__value" id="summary-total">0</p>
+      <p class="summary__sub" id="summary-total-sub">登録 0 件</p>
+    </div>
+    <div class="summary__card summary__card--warn">
+      <p class="summary__label">30日以内に失効</p>
+      <p class="summary__value" id="summary-soon">0</p>
+      <p class="summary__sub" id="summary-soon-sub">対象 0 件</p>
+    </div>
+  </section>
+
+  <div class="alert" id="alert-banner" role="status" hidden>
+    <span id="alert-text"></span>
+  </div>
+
+  <section class="toolbar" aria-label="絞り込みと並び替え">
+    <div class="search">
+      <span class="search__icon" aria-hidden="true">🔍</span>
+      <input type="search" id="search-input" placeholder="サイト名・カテゴリ・メモで検索" aria-label="検索" autocomplete="off">
+    </div>
+    <div class="toolbar__selects">
+      <label class="field field--inline">
+        <span class="field__label">状態</span>
+        <select id="filter-status">
+          <option value="all">すべて</option>
+          <option value="active">失効前のみ</option>
+          <option value="danger">まもなく失効（7日以内）</option>
+          <option value="warn">期限が近い（30日以内）</option>
+          <option value="safe">余裕あり</option>
+          <option value="none">期限なし</option>
+          <option value="expired">失効済み</option>
+        </select>
+      </label>
+      <label class="field field--inline">
+        <span class="field__label">単位</span>
+        <select id="filter-unit">
+          <option value="all">すべて</option>
+        </select>
+      </label>
+      <label class="field field--inline">
+        <span class="field__label">並び順</span>
+        <select id="sort-select">
+          <option value="expiry">期限が近い順</option>
+          <option value="points">ポイントが多い順</option>
+          <option value="site">サイト名順</option>
+          <option value="created">登録が新しい順</option>
+        </select>
+      </label>
+    </div>
+  </section>
+
+  <p class="result-count" id="result-count" aria-live="polite"></p>
+
+  <ul class="entry-list" id="entry-list"></ul>
+
+  <div class="empty-state" id="empty-state" hidden>
+    <p class="empty-state__emoji" aria-hidden="true">🪙</p>
+    <p class="empty-state__title">まだポイントが登録されていません</p>
+    <p class="empty-state__text">右下の「＋」から、サイト名・ポイント数・有効期限を登録しましょう。</p>
+    <button type="button" class="button button--primary" data-action="add">ポイントを登録する</button>
+  </div>
+</main>
+
+<button type="button" class="fab" id="add-button" aria-label="ポイントを登録">
+  <span aria-hidden="true">＋</span>
+</button>
+
+<dialog id="entry-dialog" class="dialog" aria-labelledby="dialog-title">
+  <form method="dialog" id="entry-form" class="dialog__form" novalidate>
+    <header class="dialog__header">
+      <h2 id="dialog-title">ポイントを登録</h2>
+      <button type="button" class="icon-button" data-close aria-label="閉じる"><span aria-hidden="true">✕</span></button>
+    </header>
+
+    <div class="dialog__body">
+      <input type="hidden" name="id">
+      <input type="hidden" name="createdAt">
+
+      <label class="field">
+        <span class="field__label">サイト名 <span class="required">必須</span></span>
+        <input type="text" name="site" list="site-suggestions" required maxlength="60" autocomplete="off" placeholder="例：楽天ポイント">
+        <span class="field__error" data-error="site"></span>
+      </label>
+      <datalist id="site-suggestions"></datalist>
+
+      <div class="field-row">
+        <label class="field field--grow">
+          <span class="field__label">ポイント数 <span class="required">必須</span></span>
+          <input type="text" name="points" inputmode="decimal" required placeholder="1200">
+          <span class="field__error" data-error="points"></span>
+        </label>
+        <label class="field">
+          <span class="field__label">単位</span>
+          <input type="text" name="unit" list="unit-suggestions" maxlength="10" placeholder="ポイント">
+        </label>
+      </div>
+      <datalist id="unit-suggestions"></datalist>
+
+      <fieldset class="field fieldset">
+        <legend class="field__label">有効期限</legend>
+        <div class="field-row">
+          <input type="date" name="expiry" id="expiry-input" aria-label="有効期限">
+          <label class="checkbox">
+            <input type="checkbox" name="noExpiry" id="no-expiry">
+            <span>期限なし</span>
+          </label>
+        </div>
+        <div class="chips" id="expiry-presets">
+          <button type="button" class="chip" data-months="1">1か月後</button>
+          <button type="button" class="chip" data-months="3">3か月後</button>
+          <button type="button" class="chip" data-months="6">6か月後</button>
+          <button type="button" class="chip" data-months="12">1年後</button>
+          <button type="button" class="chip" data-months="24">2年後</button>
+        </div>
+        <span class="field__error" data-error="expiry"></span>
+      </fieldset>
+
+      <div class="field-row">
+        <label class="field field--grow">
+          <span class="field__label">カテゴリ</span>
+          <input type="text" name="category" list="category-suggestions" maxlength="30" autocomplete="off" placeholder="例：ショッピング">
+        </label>
+      </div>
+      <datalist id="category-suggestions"></datalist>
+
+      <label class="field">
+        <span class="field__label">サイトURL</span>
+        <input type="url" name="url" inputmode="url" autocomplete="off" placeholder="https://example.com">
+      </label>
+
+      <label class="field">
+        <span class="field__label">メモ</span>
+        <textarea name="memo" rows="2" maxlength="200" placeholder="利用条件や交換先など"></textarea>
+      </label>
+    </div>
+
+    <footer class="dialog__footer">
+      <button type="button" class="button button--ghost is-danger" id="delete-button" hidden>削除</button>
+      <span class="spacer"></span>
+      <button type="button" class="button button--ghost" data-close>キャンセル</button>
+      <button type="submit" class="button button--primary" id="submit-button">保存</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog id="storage-dialog" class="dialog" aria-labelledby="storage-title">
+  <div class="dialog__form">
+    <header class="dialog__header">
+      <h2 id="storage-title">データの保存状態</h2>
+      <button type="button" class="icon-button" data-close-storage aria-label="閉じる"><span aria-hidden="true">✕</span></button>
+    </header>
+
+    <div class="dialog__body">
+      <dl class="status-list">
+        <div class="status-row">
+          <dt>保存先</dt>
+          <dd id="status-backend">確認中…</dd>
+        </div>
+        <div class="status-row">
+          <dt>自動削除の防止</dt>
+          <dd id="status-persist">確認中…</dd>
+        </div>
+        <div class="status-row">
+          <dt>使用容量</dt>
+          <dd id="status-usage">確認中…</dd>
+        </div>
+        <div class="status-row">
+          <dt>最終バックアップ</dt>
+          <dd id="status-backup">—</dd>
+        </div>
+      </dl>
+
+      <button type="button" class="button button--primary" id="persist-button" hidden>自動削除されないようにする</button>
+
+      <section class="status-section">
+        <h3 class="status-section__title">ファイルへの自動バックアップ</h3>
+        <p class="status-section__text" id="autobackup-text"></p>
+        <div class="status-section__actions">
+          <button type="button" class="button button--ghost" id="autobackup-set">保存先ファイルを選ぶ</button>
+          <button type="button" class="button button--ghost is-danger" id="autobackup-clear" hidden>自動バックアップを解除</button>
+        </div>
+      </section>
+
+      <p class="note">
+        データはこの端末のブラウザ内にのみ保存され、外部には送信されません。
+        ブラウザの「サイトデータを削除」や端末の初期化では消えるため、
+        大切なデータは JSON バックアップも保存しておいてください。
+      </p>
+    </div>
+
+    <footer class="dialog__footer">
+      <span class="spacer"></span>
+      <button type="button" class="button button--ghost" data-close-storage>閉じる</button>
+    </footer>
+  </div>
+</dialog>
+
+<dialog id="confirm-dialog" class="dialog dialog--small" aria-labelledby="confirm-title">
+  <div class="dialog__form">
+    <header class="dialog__header">
+      <h2 id="confirm-title">確認</h2>
+    </header>
+    <div class="dialog__body">
+      <p id="confirm-text"></p>
+    </div>
+    <footer class="dialog__footer">
+      <span class="spacer"></span>
+      <button type="button" class="button button--ghost" id="confirm-cancel">キャンセル</button>
+      <button type="button" class="button button--primary is-danger" id="confirm-ok">実行する</button>
+    </footer>
+  </div>
+</dialog>
+
+<input type="file" id="import-file" accept="application/json,.json" hidden>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

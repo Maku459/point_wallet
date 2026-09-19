@@ -1,0 +1,12 @@
+{
+  "name": "point-wallet",
+  "version": "1.0.0",
+  "private": true,
+  "description": "各サイトのポイント数と有効期限を手動で管理するPWA",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "start": "node tools/serve.js"
+  },
+  "license": "MIT"
+}

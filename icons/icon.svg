@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ポイントウォレット">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#8b5cf6"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="115" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="161" fill="#fff"/>
+  <circle cx="256" cy="256" r="135" fill="none" stroke="url(#bg)" stroke-width="8"/>
+  <g fill="none" stroke="url(#bg)" stroke-width="31" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M191.5 162.5 L256 236.6 L320.5 162.5"/>
+    <path d="M256 236.6 L256 349.5"/>
+    <path d="M204.4 275.4 H307.6"/>
+    <path d="M204.4 314.1 H307.6"/>
+  </g>
+</svg>
