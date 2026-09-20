@@ -14,11 +14,14 @@ import {
   formatDate,
   formatNumber,
   isBackupStale,
+  isSameEntry,
   sortEntries,
   statusOf,
   summarize,
   toISODate,
+  toLocalISODate,
   upcomingExpirations,
+  updatedLabel,
   validateEntry,
 } from './core.js';
 import {
@@ -354,6 +357,13 @@ function renderEntry(entry, today) {
   meta.append(badge);
   if (entry.expiry) meta.append(createEl('span', null, `${formatDate(entry.expiry)} まで`));
 
+  const updated = updatedLabel(entry.updatedAt, today);
+  if (updated) {
+    const updatedNode = createEl('time', 'entry__updated', updated);
+    updatedNode.dateTime = toLocalISODate(entry.updatedAt);
+    meta.append(updatedNode);
+  }
+
   card.append(head, points, meta);
   if (entry.memo) card.append(createEl('p', 'entry__memo', entry.memo));
   item.append(card);
@@ -546,6 +556,8 @@ async function handleSubmit(event) {
   const entry = result.entry;
   const index = entries.findIndex((item) => item.id === entry.id);
   if (index >= 0) {
+    // 開いて閉じただけで最終更新日が動かないよう、中身が同じなら記録を据え置く
+    if (isSameEntry(entries[index], entry)) entry.updatedAt = entries[index].updatedAt;
     entries[index] = entry;
   } else {
     entries.push(entry);

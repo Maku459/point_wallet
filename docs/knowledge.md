@@ -30,6 +30,7 @@
 | --- | --- |
 | 単位の候補・状態のラベル・しきい値（7日／30日／14日） | `js/core.js` の `UNITS` / `STATUS_LABELS` / `WARN_DAYS` / `DANGER_DAYS` / `BACKUP_STALE_DAYS` |
 | 入力の検証と正規化 | `js/core.js` の `validateEntry`（`sanitizeEntry` もこれを通る） |
+| 編集できる項目（最終更新日を動かすかどうかの判断） | `js/core.js` の `EDITABLE_FIELDS` |
 | 並び替えの種類 | `js/core.js` の `sortEntries` の `comparators` |
 | 保存先・永続化要求・自動バックアップ先の保持 | `js/db.js` |
 | 保存／読み出し／バックアップの組み立て | `js/store.js` |
@@ -65,6 +66,26 @@
   ローカル表記の文字列を混ぜると比較が壊れる
 - 旧形式のバックアップ（配列がそのまま入っている JSON）と、`site` ではなく `name` で
   書かれた行も受ける。取り込み口を増やすときはここに合わせる
+
+## 最終更新日（`updatedAt`）はカードに出ている
+
+`validateEntry` が保存のたびに `updatedAt` を入れ直すので、記録は自動で残る。
+表示するようになったぶん、次の 3 つを守らないと**画面に嘘の日付が出る**。
+
+- **中身が変わっていないときは据え置く。** 編集ダイアログを開いて閉じただけで
+  日付が動くと「最終更新日」の意味が無くなる。判断は `isSameEntry`
+  （`EDITABLE_FIELDS` が同じか）で、`handleSubmit` の 1 か所だけが呼ぶ
+- **編集できる項目を足したら `EDITABLE_FIELDS` にも足す。** 足し忘れると、
+  その項目だけを変えて保存したときに最終更新日が動かない。フォームと
+  `validateEntry` だけ直して終わりにしない
+- **表示は `toLocalISODate` を通す。** `updatedAt` は `toISOString()` の
+  タイムスタンプなので、`new Date(isoString)` で読むのは正しい
+  （`YYYY-MM-DD` を直に渡すときだけ UTC 解釈の罠がある。→「日付は
+  『ローカルタイムの YYYY-MM-DD』で扱う」）。日本時間の朝 8 時は UTC では前日なので、
+  文字列を切り出さずローカル日付へ直す
+
+「今日 / 昨日」の判定は**暦の上の日数差**で見る（`updatedLabel` が `daysUntil`
+を使う）。`daysSince` のような経過時間で割ると、昨日の 23 時が「0 日前 = 今日」になる。
 
 ## 保存は「二重持ち・片方が落ちても続ける」
 

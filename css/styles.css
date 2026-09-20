@@ -366,6 +366,13 @@ button:focus-visible, a:focus-visible {
   background: var(--status-soft);
   white-space: nowrap;
 }
+.entry__updated {
+  /* 期限の情報と離して右端へ。幅が足りなければ折り返って次の行に落ちる */
+  margin-left: auto;
+  white-space: nowrap;
+  font-size: 11px;
+  opacity: .85;
+}
 .entry__memo {
   grid-column: 1 / -1;
   font-size: 12px;
