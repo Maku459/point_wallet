@@ -8,18 +8,6 @@ export const WARN_DAYS = 30;
 /** 失効が差し迫っていると判定する日数（危険） */
 export const DANGER_DAYS = 7;
 
-/** 登録できる単位の候補 */
-export const UNITS = ['ポイント', 'マイル', '円', 'コイン', 'スタンプ'];
-
-/** 状態ごとの表示ラベル */
-export const STATUS_LABELS = {
-  expired: '失効済み',
-  danger: 'まもなく失効',
-  warn: '期限が近い',
-  safe: '有効',
-  none: '期限なし',
-};
-
 /** 衝突しにくい ID を生成する */
 export function uid() {
   const rand = Math.random().toString(36).slice(2, 10);
@@ -115,7 +103,7 @@ export function updatedLabel(isoString, today = toISODate()) {
 }
 
 /** ユーザーが編集できる項目。ここが同じなら「変更なし」とみなす */
-const EDITABLE_FIELDS = ['site', 'points', 'unit', 'expiry', 'category', 'url', 'memo'];
+const EDITABLE_FIELDS = ['site', 'points', 'expiry', 'category', 'url', 'memo'];
 
 /** 中身（編集できる項目）が同じかどうか。id / createdAt / updatedAt は見ない */
 export function isSameEntry(a, b) {
@@ -155,7 +143,6 @@ export function validateEntry(input, now = new Date()) {
       id: input.id || uid(),
       site,
       points,
-      unit: String(input.unit ?? '').trim() || UNITS[0],
       expiry: expiry || '',
       category: String(input.category ?? '').trim(),
       url: String(input.url ?? '').trim(),
@@ -174,7 +161,6 @@ export function sanitizeEntry(raw) {
       id: typeof raw.id === 'string' ? raw.id : '',
       site: raw.site ?? raw.name ?? '',
       points: raw.points ?? 0,
-      unit: raw.unit,
       expiry: raw.expiry ?? '',
       category: raw.category,
       url: raw.url,
@@ -196,20 +182,15 @@ export function sanitizeEntry(raw) {
   return result.entry;
 }
 
-/** 検索・絞り込み */
-export function filterEntries(entries, { query = '', status = 'all', unit = 'all' } = {}, today = toISODate()) {
+/** 検索（サイト名・カテゴリ・メモの横断） */
+export function filterEntries(entries, { query = '' } = {}) {
   const q = query.trim().toLowerCase();
-  return entries.filter((entry) => {
-    if (status !== 'all') {
-      const s = statusOf(entry, today);
-      if (status === 'active' ? s === 'expired' : s !== status) return false;
-    }
-    if (unit !== 'all' && entry.unit !== unit) return false;
-    if (!q) return true;
-    return [entry.site, entry.category, entry.memo, entry.unit]
+  if (!q) return [...entries];
+  return entries.filter((entry) =>
+    [entry.site, entry.category, entry.memo]
       .filter(Boolean)
-      .some((field) => String(field).toLowerCase().includes(q));
-  });
+      .some((field) => String(field).toLowerCase().includes(q)),
+  );
 }
 
 /** 並び替え（元配列は変更しない） */
@@ -232,36 +213,30 @@ export function sortEntries(entries, key = 'expiry') {
 }
 
 /**
- * 集計。単位ごとの合計と、指定日数以内に失効するポイントを返す。
+ * 集計。保有ポイントの合計と、指定日数以内に失効するポイントを返す。
  */
 export function summarize(entries, today = toISODate(), withinDays = WARN_DAYS) {
-  const totals = new Map();
-  const expiringSoon = new Map();
+  let total = 0;
+  let expiringSoon = 0;
   let expiredCount = 0;
   let soonCount = 0;
 
   for (const entry of entries) {
-    const status = statusOf(entry, today);
-    if (status === 'expired') {
+    if (statusOf(entry, today) === 'expired') {
       expiredCount += 1;
       continue; // 失効済みは合計に含めない
     }
-    totals.set(entry.unit, (totals.get(entry.unit) || 0) + entry.points);
+    total += entry.points;
     const days = daysUntil(entry.expiry, today);
     if (days !== null && days <= withinDays) {
-      expiringSoon.set(entry.unit, (expiringSoon.get(entry.unit) || 0) + entry.points);
+      expiringSoon += entry.points;
       soonCount += 1;
     }
   }
 
-  const toList = (map) =>
-    [...map.entries()]
-      .map(([unit, points]) => ({ unit, points }))
-      .sort((a, b) => b.points - a.points);
-
   return {
-    totals: toList(totals),
-    expiringSoon: toList(expiringSoon),
+    total,
+    expiringSoon,
     expiredCount,
     soonCount,
     totalCount: entries.length,

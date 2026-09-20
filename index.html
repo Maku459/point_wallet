@@ -64,30 +64,12 @@
     <span id="alert-text"></span>
   </div>
 
-  <section class="toolbar" aria-label="絞り込みと並び替え">
+  <section class="toolbar" aria-label="検索と並び替え">
     <div class="search">
       <span class="search__icon" aria-hidden="true">🔍</span>
       <input type="search" id="search-input" placeholder="サイト名・カテゴリ・メモで検索" aria-label="検索" autocomplete="off">
     </div>
     <div class="toolbar__selects">
-      <label class="field field--inline">
-        <span class="field__label">状態</span>
-        <select id="filter-status">
-          <option value="all">すべて</option>
-          <option value="active">失効前のみ</option>
-          <option value="danger">まもなく失効（7日以内）</option>
-          <option value="warn">期限が近い（30日以内）</option>
-          <option value="safe">余裕あり</option>
-          <option value="none">期限なし</option>
-          <option value="expired">失効済み</option>
-        </select>
-      </label>
-      <label class="field field--inline">
-        <span class="field__label">単位</span>
-        <select id="filter-unit">
-          <option value="all">すべて</option>
-        </select>
-      </label>
       <label class="field field--inline">
         <span class="field__label">並び順</span>
         <select id="sort-select">
@@ -134,18 +116,11 @@
       </label>
       <datalist id="site-suggestions"></datalist>
 
-      <div class="field-row">
-        <label class="field field--grow">
-          <span class="field__label">ポイント数 <span class="required">必須</span></span>
-          <input type="text" name="points" inputmode="decimal" required placeholder="1200">
-          <span class="field__error" data-error="points"></span>
-        </label>
-        <label class="field">
-          <span class="field__label">単位</span>
-          <input type="text" name="unit" list="unit-suggestions" maxlength="10" placeholder="ポイント">
-        </label>
-      </div>
-      <datalist id="unit-suggestions"></datalist>
+      <label class="field">
+        <span class="field__label">ポイント数 <span class="required">必須</span></span>
+        <input type="text" name="points" inputmode="decimal" required placeholder="1200">
+        <span class="field__error" data-error="points"></span>
+      </label>
 
       <fieldset class="field fieldset">
         <legend class="field__label">有効期限</legend>
@@ -156,22 +131,13 @@
             <span>期限なし</span>
           </label>
         </div>
-        <div class="chips" id="expiry-presets">
-          <button type="button" class="chip" data-months="1">1か月後</button>
-          <button type="button" class="chip" data-months="3">3か月後</button>
-          <button type="button" class="chip" data-months="6">6か月後</button>
-          <button type="button" class="chip" data-months="12">1年後</button>
-          <button type="button" class="chip" data-months="24">2年後</button>
-        </div>
         <span class="field__error" data-error="expiry"></span>
       </fieldset>
 
-      <div class="field-row">
-        <label class="field field--grow">
-          <span class="field__label">カテゴリ</span>
-          <input type="text" name="category" list="category-suggestions" maxlength="30" autocomplete="off" placeholder="例：ショッピング">
-        </label>
-      </div>
+      <label class="field">
+        <span class="field__label">カテゴリ</span>
+        <input type="text" name="category" list="category-suggestions" maxlength="30" autocomplete="off" placeholder="例：ショッピング">
+      </label>
       <datalist id="category-suggestions"></datalist>
 
       <label class="field">

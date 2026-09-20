@@ -15,8 +15,6 @@ export const EXPORT_FORMAT = 'point-wallet-backup';
 
 const defaultSettings = {
   sort: 'expiry',
-  status: 'all',
-  unit: 'all',
   theme: 'auto',
   notify: false,
   lastBackupAt: '',
