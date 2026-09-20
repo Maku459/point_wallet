@@ -93,6 +93,37 @@ export function formatDate(value) {
 }
 
 /**
+ * ISO のタイムスタンプ（createdAt / updatedAt）をローカルタイムの YYYY-MM-DD にする。
+ * 未設定・不正な値は空文字。
+ */
+export function toLocalISODate(isoString) {
+  if (typeof isoString !== 'string' || isoString === '') return '';
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return '';
+  return toISODate(date);
+}
+
+/** 最終更新日の表示文言。記録が無い・壊れているときは空文字 */
+export function updatedLabel(isoString, today = toISODate()) {
+  const day = toLocalISODate(isoString);
+  if (!day) return '';
+  // 暦の上での日数差で見る（経過時間で割ると、23時→翌0時が「0日前」になる）
+  const diff = daysUntil(day, today);
+  if (diff === 0) return '今日 更新';
+  if (diff === -1) return '昨日 更新';
+  return `${formatDate(day)} 更新`;
+}
+
+/** ユーザーが編集できる項目。ここが同じなら「変更なし」とみなす */
+const EDITABLE_FIELDS = ['site', 'points', 'unit', 'expiry', 'category', 'url', 'memo'];
+
+/** 中身（編集できる項目）が同じかどうか。id / createdAt / updatedAt は見ない */
+export function isSameEntry(a, b) {
+  if (!a || !b) return false;
+  return EDITABLE_FIELDS.every((key) => a[key] === b[key]);
+}
+
+/**
  * 入力値を検証して正規化する。
  * @returns {{ok: true, entry: object} | {ok: false, errors: Record<string,string>}}
  */
@@ -153,7 +184,15 @@ export function sanitizeEntry(raw) {
     new Date(),
   );
   if (!result.ok) return null;
-  if (typeof raw.updatedAt === 'string') result.entry.updatedAt = raw.updatedAt;
+  // validateEntry は updatedAt を「いま」で入れ直すので、保存済みの値があれば必ず戻す。
+  // 素通しすると取り込んだ全件が「いま更新された」ことになり、mergeEntries の新旧判定が
+  // 常に取り込み側の勝ちになる。記録が無い古いデータは登録日に合わせる（読み込むたびに
+  // 最終更新日が今日へ動くのを防ぐ）。
+  if (typeof raw.updatedAt === 'string' && raw.updatedAt !== '') {
+    result.entry.updatedAt = raw.updatedAt;
+  } else if (result.entry.createdAt) {
+    result.entry.updatedAt = result.entry.createdAt;
+  }
   return result.entry;
 }
 

@@ -7,15 +7,19 @@ import {
   daysUntil,
   formatBytes,
   isBackupStale,
+  isSameEntry,
   expiryLabel,
   filterEntries,
   formatDate,
   parseISODate,
+  sanitizeEntry,
   sortEntries,
   statusOf,
   summarize,
   toISODate,
+  toLocalISODate,
   upcomingExpirations,
+  updatedLabel,
   validateEntry,
 } from '../js/core.js';
 
@@ -230,5 +234,85 @@ describe('保存状態の表示', () => {
     assert.equal(backupAgeLabel('2026-09-19T01:00:00.000Z', NOW), '今日');
     assert.equal(backupAgeLabel('2026-09-18T10:00:00.000Z', NOW), '昨日');
     assert.equal(backupAgeLabel('2026-09-09T12:00:00.000Z', NOW), '10日前');
+  });
+});
+
+describe('最終更新日', () => {
+  test('toLocalISODate は ISO のタイムスタンプをローカル日付にする', () => {
+    // 日本時間の 2026-09-19 08:00 は UTC では前日の 23:00。ローカルの日付で返す
+    const iso = new Date(2026, 8, 19, 8, 0, 0).toISOString();
+    assert.equal(toLocalISODate(iso), '2026-09-19');
+  });
+
+  test('toLocalISODate は未設定・壊れた値を空文字で返す', () => {
+    assert.equal(toLocalISODate(''), '');
+    assert.equal(toLocalISODate(undefined), '');
+    assert.equal(toLocalISODate('きのう'), '');
+  });
+
+  test('updatedLabel は今日・昨日を言葉にし、それ以外は日付で出す', () => {
+    const at = (y, m, d, h = 12) => new Date(y, m - 1, d, h).toISOString();
+    assert.equal(updatedLabel(at(2026, 9, 19), TODAY), '今日 更新');
+    assert.equal(updatedLabel(at(2026, 9, 18), TODAY), '昨日 更新');
+    assert.equal(updatedLabel(at(2026, 9, 17), TODAY), '2026年9月17日 更新');
+  });
+
+  test('updatedLabel は日付の差で判定する（経過時間では見ない）', () => {
+    // 昨日の 23:00 は 13 時間前だが、暦の上では「昨日」
+    assert.equal(updatedLabel(new Date(2026, 8, 18, 23, 0).toISOString(), TODAY), '昨日 更新');
+    // 今日の 0:05 は「今日」
+    assert.equal(updatedLabel(new Date(2026, 8, 19, 0, 5).toISOString(), TODAY), '今日 更新');
+  });
+
+  test('updatedLabel は記録が無ければ空文字（表示しない）', () => {
+    assert.equal(updatedLabel('', TODAY), '');
+    assert.equal(updatedLabel(undefined, TODAY), '');
+  });
+
+  test('validateEntry は保存のたびに updatedAt を記録する', () => {
+    const now = new Date(2026, 8, 19, 10, 0);
+    const result = validateEntry({ site: 'サイト', points: '100' }, now);
+    assert.ok(result.ok);
+    assert.equal(result.entry.updatedAt, now.toISOString());
+    assert.equal(result.entry.createdAt, now.toISOString());
+  });
+
+  test('validateEntry は createdAt を引き継ぎ、updatedAt だけ入れ直す', () => {
+    const now = new Date(2026, 8, 19, 10, 0);
+    const created = '2026-01-01T00:00:00.000Z';
+    const result = validateEntry({ id: 'id', site: 'サイト', points: '100', createdAt: created }, now);
+    assert.ok(result.ok);
+    assert.equal(result.entry.createdAt, created);
+    assert.equal(result.entry.updatedAt, now.toISOString());
+  });
+
+  test('sanitizeEntry は保存済みの updatedAt を保つ', () => {
+    const saved = entry({ updatedAt: '2026-05-05T00:00:00.000Z' });
+    assert.equal(sanitizeEntry(saved).updatedAt, '2026-05-05T00:00:00.000Z');
+  });
+
+  test('sanitizeEntry は updatedAt が無い古いデータを登録日に合わせる', () => {
+    // 読み込むたびに「今日」へ動いてしまわないこと
+    const legacy = { site: 'サイト', points: 100, createdAt: '2026-01-01T00:00:00.000Z' };
+    assert.equal(sanitizeEntry(legacy).updatedAt, '2026-01-01T00:00:00.000Z');
+  });
+});
+
+describe('isSameEntry', () => {
+  test('編集できる項目が同じなら true', () => {
+    const a = entry({ updatedAt: '2026-01-01T00:00:00.000Z' });
+    const b = entry({ updatedAt: '2026-09-19T00:00:00.000Z', createdAt: '2020-01-01T00:00:00.000Z' });
+    assert.equal(isSameEntry(a, b), true);
+  });
+
+  test('編集できる項目が 1 つでも違えば false', () => {
+    for (const over of [{ site: '別' }, { points: 101 }, { unit: 'マイル' }, { expiry: '2026-12-31' }, { category: '別' }, { url: 'https://example.com/' }, { memo: '別' }]) {
+      assert.equal(isSameEntry(entry(), entry(over)), false, JSON.stringify(over));
+    }
+  });
+
+  test('片方が無ければ false', () => {
+    assert.equal(isSameEntry(entry(), null), false);
+    assert.equal(isSameEntry(undefined, entry()), false);
   });
 });
