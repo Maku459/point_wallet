@@ -29,7 +29,6 @@ const entry = (over = {}) => ({
   id: over.id || 'id',
   site: 'サイト',
   points: 100,
-  unit: 'ポイント',
   expiry: '',
   category: '',
   url: '',
@@ -121,32 +120,31 @@ describe('入力の検証', () => {
     const result = validateEntry({ site: ' 楽天 ', points: '10' });
     assert.equal(result.ok, true);
     assert.equal(result.entry.site, '楽天');
-    assert.equal(result.entry.unit, 'ポイント');
     assert.ok(result.entry.id);
     assert.ok(result.entry.createdAt);
   });
 });
 
-describe('絞り込みと並び替え', () => {
+describe('検索と並び替え', () => {
   const entries = [
     entry({ id: '1', site: '楽天', points: 300, expiry: '2026-10-01', category: 'EC' }),
-    entry({ id: '2', site: 'ANA', points: 5000, unit: 'マイル', expiry: '', memo: '特典航空券' }),
+    entry({ id: '2', site: 'ANA', points: 5000, expiry: '', memo: '特典航空券' }),
     entry({ id: '3', site: 'dポイント', points: 120, expiry: '2026-09-01' }),
     entry({ id: '4', site: 'Ponta', points: 900, expiry: '2026-09-22' }),
   ];
 
   test('キーワードはサイト名・カテゴリ・メモを横断する', () => {
-    assert.deepEqual(filterEntries(entries, { query: '楽天' }, TODAY).map((e) => e.id), ['1']);
-    assert.deepEqual(filterEntries(entries, { query: 'ec' }, TODAY).map((e) => e.id), ['1']);
-    assert.deepEqual(filterEntries(entries, { query: '特典' }, TODAY).map((e) => e.id), ['2']);
-    assert.equal(filterEntries(entries, { query: '該当なし' }, TODAY).length, 0);
+    assert.deepEqual(filterEntries(entries, { query: '楽天' }).map((e) => e.id), ['1']);
+    assert.deepEqual(filterEntries(entries, { query: 'ec' }).map((e) => e.id), ['1']);
+    assert.deepEqual(filterEntries(entries, { query: '特典' }).map((e) => e.id), ['2']);
+    assert.equal(filterEntries(entries, { query: '該当なし' }).length, 0);
   });
 
-  test('状態と単位で絞り込める', () => {
-    assert.deepEqual(filterEntries(entries, { status: 'expired' }, TODAY).map((e) => e.id), ['3']);
-    assert.deepEqual(filterEntries(entries, { status: 'none' }, TODAY).map((e) => e.id), ['2']);
-    assert.deepEqual(filterEntries(entries, { status: 'active' }, TODAY).map((e) => e.id), ['1', '2', '4']);
-    assert.deepEqual(filterEntries(entries, { unit: 'マイル' }, TODAY).map((e) => e.id), ['2']);
+  test('キーワードが無ければ全件を返し、元の配列は変えない', () => {
+    const all = filterEntries(entries, { query: '  ' });
+    assert.deepEqual(all.map((e) => e.id), ['1', '2', '3', '4']);
+    assert.notEqual(all, entries);
+    assert.deepEqual(filterEntries(entries).map((e) => e.id), ['1', '2', '3', '4']);
   });
 
   test('期限順では期限なしが末尾になる', () => {
@@ -173,24 +171,21 @@ describe('絞り込みと並び替え', () => {
 describe('集計', () => {
   const entries = [
     entry({ id: '1', points: 300, expiry: '2026-10-01' }),   // 30日以内
-    entry({ id: '2', points: 5000, unit: 'マイル', expiry: '' }),
+    entry({ id: '2', points: 5000, expiry: '' }),
     entry({ id: '3', points: 120, expiry: '2026-09-01' }),   // 失効済み
     entry({ id: '4', points: 900, expiry: '2027-01-01' }),
   ];
 
   test('失効済みは合計から除外する', () => {
     const stats = summarize(entries, TODAY);
-    assert.deepEqual(stats.totals, [
-      { unit: 'マイル', points: 5000 },
-      { unit: 'ポイント', points: 1200 },
-    ]);
+    assert.equal(stats.total, 6200);
     assert.equal(stats.expiredCount, 1);
     assert.equal(stats.totalCount, 4);
   });
 
-  test('30日以内に失効する分を単位ごとに集計する', () => {
+  test('30日以内に失効する分を集計する', () => {
     const stats = summarize(entries, TODAY);
-    assert.deepEqual(stats.expiringSoon, [{ unit: 'ポイント', points: 300 }]);
+    assert.equal(stats.expiringSoon, 300);
     assert.equal(stats.soonCount, 1);
   });
 
@@ -296,6 +291,12 @@ describe('最終更新日', () => {
     const legacy = { site: 'サイト', points: 100, createdAt: '2026-01-01T00:00:00.000Z' };
     assert.equal(sanitizeEntry(legacy).updatedAt, '2026-01-01T00:00:00.000Z');
   });
+
+  test('sanitizeEntry は廃止した unit を落とす', () => {
+    // 単位を持っていた頃のバックアップを取り込んでも、項目は復活させない
+    const legacy = { site: 'サイト', points: 100, unit: 'マイル' };
+    assert.equal('unit' in sanitizeEntry(legacy), false);
+  });
 });
 
 describe('isSameEntry', () => {
@@ -306,7 +307,7 @@ describe('isSameEntry', () => {
   });
 
   test('編集できる項目が 1 つでも違えば false', () => {
-    for (const over of [{ site: '別' }, { points: 101 }, { unit: 'マイル' }, { expiry: '2026-12-31' }, { category: '別' }, { url: 'https://example.com/' }, { memo: '別' }]) {
+    for (const over of [{ site: '別' }, { points: 101 }, { expiry: '2026-12-31' }, { category: '別' }, { url: 'https://example.com/' }, { memo: '別' }]) {
       assert.equal(isSameEntry(entry(), entry(over)), false, JSON.stringify(over));
     }
   });

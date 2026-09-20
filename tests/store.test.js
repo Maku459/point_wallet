@@ -6,7 +6,6 @@ const entry = (over = {}) => ({
   id: 'a',
   site: 'サイト',
   points: 100,
-  unit: 'ポイント',
   expiry: '',
   category: '',
   url: '',

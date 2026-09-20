@@ -4,8 +4,6 @@
 import {
   BACKUP_STALE_DAYS,
   DANGER_DAYS,
-  STATUS_LABELS,
-  UNITS,
   WARN_DAYS,
   backupAgeLabel,
   expiryLabel,
@@ -59,8 +57,6 @@ const el = {
   alert: $('#alert-banner'),
   alertText: $('#alert-text'),
   search: $('#search-input'),
-  filterStatus: $('#filter-status'),
-  filterUnit: $('#filter-unit'),
   sortSelect: $('#sort-select'),
   dialog: $('#entry-dialog'),
   form: $('#entry-form'),
@@ -88,7 +84,6 @@ const el = {
   importFile: $('#import-file'),
   toast: $('#toast'),
   siteSuggestions: $('#site-suggestions'),
-  unitSuggestions: $('#unit-suggestions'),
   categorySuggestions: $('#category-suggestions'),
 };
 
@@ -302,23 +297,8 @@ function createEl(tag, className, text) {
 function renderSummary(today) {
   const stats = summarize(entries, today, WARN_DAYS);
 
-  const fillTotals = (target, list, emptyText) => {
-    target.replaceChildren();
-    if (list.length === 0) {
-      target.append(createEl('span', null, emptyText));
-      return;
-    }
-    const [first, ...rest] = list;
-    target.append(document.createTextNode(formatNumber(first.points)));
-    target.append(createEl('span', 'unit', first.unit));
-    if (rest.length > 0) {
-      const restText = rest.map((item) => `${formatNumber(item.points)} ${item.unit}`).join(' / ');
-      target.append(createEl('span', 'more', restText));
-    }
-  };
-
-  fillTotals(el.summaryTotal, stats.totals, '0');
-  fillTotals(el.summarySoon, stats.expiringSoon, '0');
+  el.summaryTotal.textContent = formatNumber(stats.total);
+  el.summarySoon.textContent = formatNumber(stats.expiringSoon);
 
   el.summaryTotalSub.textContent =
     stats.expiredCount > 0
@@ -342,19 +322,16 @@ function renderEntry(entry, today) {
   const card = createEl('button', `entry entry--${status}`);
   card.type = 'button';
   card.dataset.id = entry.id;
-  card.setAttribute('aria-label', `${entry.site} ${formatNumber(entry.points)}${entry.unit} を編集`);
+  card.setAttribute('aria-label', `${entry.site} ${formatNumber(entry.points)} を編集`);
 
   const head = createEl('div', 'entry__head');
   head.append(createEl('span', 'entry__site', entry.site));
   if (entry.category) head.append(createEl('span', 'entry__category', entry.category));
 
-  const points = createEl('div', 'entry__points');
-  points.append(document.createTextNode(formatNumber(entry.points)));
-  points.append(createEl('span', 'unit', entry.unit));
+  const points = createEl('div', 'entry__points', formatNumber(entry.points));
 
   const meta = createEl('div', 'entry__meta');
-  const badge = createEl('span', 'entry__badge', status === 'none' ? STATUS_LABELS.none : expiryLabel(entry, today));
-  meta.append(badge);
+  meta.append(createEl('span', 'entry__badge', expiryLabel(entry, today)));
   if (entry.expiry) meta.append(createEl('span', null, `${formatDate(entry.expiry)} まで`));
 
   const updated = updatedLabel(entry.updatedAt, today);
@@ -383,11 +360,7 @@ function renderEntry(entry, today) {
 }
 
 function renderList(today) {
-  const filtered = filterEntries(
-    entries,
-    { query: el.search.value, status: settings.status, unit: settings.unit },
-    today,
-  );
+  const filtered = filterEntries(entries, { query: el.search.value });
   const sorted = sortEntries(filtered, settings.sort);
 
   el.list.replaceChildren(...sorted.map((entry) => renderEntry(entry, today)));
@@ -407,20 +380,7 @@ function renderList(today) {
   }
 }
 
-function renderFilters() {
-  const units = [...new Set(entries.map((entry) => entry.unit))].sort((a, b) => a.localeCompare(b, 'ja'));
-  const current = settings.unit;
-  el.filterUnit.replaceChildren(createEl('option', null, 'すべて'));
-  el.filterUnit.firstChild.value = 'all';
-  for (const unit of units) {
-    const option = createEl('option', null, unit);
-    option.value = unit;
-    el.filterUnit.append(option);
-  }
-  el.filterUnit.value = units.includes(current) ? current : 'all';
-  if (el.filterUnit.value === 'all' && current !== 'all') updateSettings({ unit: 'all' });
-
-  el.filterStatus.value = settings.status;
+function renderSortSelect() {
   el.sortSelect.value = settings.sort;
 }
 
@@ -435,13 +395,12 @@ function renderSuggestions() {
   };
   fill(el.siteSuggestions, [...new Set(entries.map((e) => e.site))].sort((a, b) => a.localeCompare(b, 'ja')));
   fill(el.categorySuggestions, [...new Set(entries.map((e) => e.category).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ja')));
-  fill(el.unitSuggestions, [...new Set([...entries.map((e) => e.unit), ...UNITS])]);
 }
 
 function render() {
   const today = toISODate();
   renderSummary(today);
-  renderFilters();
+  renderSortSelect();
   renderList(today);
   renderSuggestions();
 }
@@ -501,12 +460,11 @@ function openDialog(entry) {
   el.dialogTitle.textContent = isEdit ? 'ポイントを編集' : 'ポイントを登録';
   el.deleteButton.hidden = !isEdit;
 
-  const values = entry || { unit: UNITS[0] };
+  const values = entry || {};
   el.form.elements.id.value = values.id || '';
   el.form.elements.createdAt.value = values.createdAt || '';
   el.form.elements.site.value = values.site || '';
   el.form.elements.points.value = values.points !== undefined ? String(values.points) : '';
-  el.form.elements.unit.value = values.unit || UNITS[0];
   el.form.elements.expiry.value = values.expiry || '';
   el.form.elements.category.value = values.category || '';
   el.form.elements.url.value = values.url || '';
@@ -522,17 +480,7 @@ function syncExpiryDisabled() {
   const off = el.noExpiry.checked;
   el.expiryInput.disabled = off;
   el.expiryInput.style.opacity = off ? '.45' : '';
-  for (const chip of el.form.querySelectorAll('#expiry-presets .chip')) chip.disabled = off;
   if (off) el.expiryInput.value = '';
-}
-
-/** 月を加算した日付を返す。月末を超える場合はその月の末日に丸める */
-function addMonths(base, months) {
-  const date = new Date(base.getFullYear(), base.getMonth(), 1);
-  date.setMonth(date.getMonth() + months);
-  const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
-  date.setDate(Math.min(base.getDate(), lastDay));
-  return date;
 }
 
 async function handleSubmit(event) {
@@ -654,14 +602,23 @@ async function clearAll() {
   showToast('すべて削除しました');
 }
 
+/** 月を加算した日付を返す。月末を超える場合はその月の末日に丸める */
+function addMonths(base, months) {
+  const date = new Date(base.getFullYear(), base.getMonth(), 1);
+  date.setMonth(date.getMonth() + months);
+  const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  date.setDate(Math.min(base.getDate(), lastDay));
+  return date;
+}
+
 async function addSampleData() {
   const today = new Date();
   const iso = (months) => toISODate(addMonths(today, months));
   const samples = [
-    { site: '楽天ポイント', points: 3200, unit: 'ポイント', expiry: iso(1), category: 'ショッピング', memo: '期間限定ポイントを含む' },
-    { site: 'Tポイント', points: 850, unit: 'ポイント', expiry: iso(6), category: '共通ポイント', memo: '' },
-    { site: 'ANAマイル', points: 12500, unit: 'マイル', expiry: iso(18), category: '航空', memo: '特典航空券に交換予定' },
-    { site: 'Amazonギフト残高', points: 1500, unit: '円', expiry: '', category: 'ショッピング', memo: '' },
+    { site: '楽天ポイント', points: 3200, expiry: iso(1), category: 'ショッピング', memo: '期間限定ポイントを含む' },
+    { site: 'Tポイント', points: 850, expiry: iso(6), category: '共通ポイント', memo: '' },
+    { site: 'ANAマイル', points: 12500, expiry: iso(18), category: '航空', memo: '特典航空券に交換予定' },
+    { site: 'Amazonギフト残高', points: 1500, expiry: '', category: 'ショッピング', memo: '' },
   ];
   for (const sample of samples) {
     const result = validateEntry(sample);
@@ -734,7 +691,7 @@ function notifyUpcoming() {
   const first = urgent[0];
   const body =
     urgent.length === 1
-      ? `${first.site}：${formatNumber(first.points)}${first.unit}（${expiryLabel(first, today)}）`
+      ? `${first.site}：${formatNumber(first.points)}（${expiryLabel(first, today)}）`
       : `${first.site} ほか ${urgent.length - 1} 件が ${DANGER_DAYS} 日以内に失効します`;
   try {
     new Notification('まもなく失効するポイントがあります', { body, icon: 'icons/icon-192.png', tag: 'point-wallet-expiry' });
@@ -791,23 +748,8 @@ el.autoBackupSet.addEventListener('click', reauthorizeBackup);
 el.autoBackupClear.addEventListener('click', removeAutoBackup);
 
 el.noExpiry.addEventListener('change', syncExpiryDisabled);
-$('#expiry-presets').addEventListener('click', (event) => {
-  const chip = event.target.closest('.chip');
-  if (!chip) return;
-  el.noExpiry.checked = false;
-  syncExpiryDisabled();
-  el.expiryInput.value = toISODate(addMonths(new Date(), Number(chip.dataset.months)));
-});
 
 el.search.addEventListener('input', () => renderList(toISODate()));
-el.filterStatus.addEventListener('change', () => {
-  updateSettings({ status: el.filterStatus.value });
-  renderList(toISODate());
-});
-el.filterUnit.addEventListener('change', () => {
-  updateSettings({ unit: el.filterUnit.value });
-  renderList(toISODate());
-});
 el.sortSelect.addEventListener('change', () => {
   updateSettings({ sort: el.sortSelect.value });
   renderList(toISODate());

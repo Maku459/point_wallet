@@ -3,7 +3,7 @@
  * アプリ本体はキャッシュ優先＋バックグラウンド更新、ページ遷移はネットワーク優先。
  * ポイントデータは localStorage にあるため、ここでは扱わない。
  */
-const VERSION = 'v5';
+const VERSION = 'v6';
 const CACHE_NAME = `point-wallet-${VERSION}`;
 
 const PRECACHE = [

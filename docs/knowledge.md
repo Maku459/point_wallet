@@ -28,7 +28,7 @@
 
 | 増やしたいもの | 触るファイル |
 | --- | --- |
-| 単位の候補・状態のラベル・しきい値（7日／30日／14日） | `js/core.js` の `UNITS` / `STATUS_LABELS` / `WARN_DAYS` / `DANGER_DAYS` / `BACKUP_STALE_DAYS` |
+| 状態のしきい値（7日／30日／14日） | `js/core.js` の `WARN_DAYS` / `DANGER_DAYS` / `BACKUP_STALE_DAYS` |
 | 入力の検証と正規化 | `js/core.js` の `validateEntry`（`sanitizeEntry` もこれを通る） |
 | 編集できる項目（最終更新日を動かすかどうかの判断） | `js/core.js` の `EDITABLE_FIELDS` |
 | 並び替えの種類 | `js/core.js` の `sortEntries` の `comparators` |
@@ -66,6 +66,9 @@
   ローカル表記の文字列を混ぜると比較が壊れる
 - 旧形式のバックアップ（配列がそのまま入っている JSON）と、`site` ではなく `name` で
   書かれた行も受ける。取り込み口を増やすときはここに合わせる
+- **知らない項目は黙って落とす。** `validateEntry` が組み立てた項目しか通さないので、
+  廃止した `unit` を持つ古いバックアップを読んでも項目は復活しない。
+  項目を増やすときは `validateEntry` の戻り値に足す（足さないと取り込みで消える）
 
 ## 最終更新日（`updatedAt`）はカードに出ている
 
@@ -131,7 +134,6 @@ File System Access API の `FileSystemFileHandle` は構造化複製で IndexedD
 
 `summarize` は失効済みを合計から外し、件数だけ `expiredCount` で返す。
 「持っている量」を見せる欄なので、使えないポイントを足すと意味が変わる。
-絞り込みの `status: 'active'` も「失効済み以外すべて」で、有効期限の有無は問わない。
 
 期限なしのポイントは並び替えで**常に末尾**へ置く（`sortEntries` の `byExpiry`）。
 期限の近い順に見る画面なので、期限が無いものを先頭に混ぜない。
