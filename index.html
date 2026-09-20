@@ -5,14 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>ポイントウォレット</title>
 <meta name="description" content="各サイトのポイント数と有効期限を手動で登録して管理するPWAアプリ。データは端末内だけに保存されます。">
-<meta name="theme-color" content="#6366f1" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#111827" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f2f5f9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b1826" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="ポイント">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<!-- black-translucent はステータスバーの文字が常に白になり、明るいヘッダーでは読めなくなる -->
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-32.png" type="image/png" sizes="32x32">
+<link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -20,7 +23,7 @@
 
 <header class="app-header">
   <div class="app-header__title">
-    <img src="icons/icon.svg" alt="" width="28" height="28" aria-hidden="true">
+    <img class="app-header__logo" src="icons/icon-64.png" alt="" width="28" height="28" aria-hidden="true">
     <h1>ポイントウォレット</h1>
   </div>
   <div class="app-header__actions">

@@ -3,7 +3,7 @@
  * アプリ本体はキャッシュ優先＋バックグラウンド更新、ページ遷移はネットワーク優先。
  * ポイントデータは localStorage にあるため、ここでは扱わない。
  */
-const VERSION = 'v2';
+const VERSION = 'v4';
 const CACHE_NAME = `point-wallet-${VERSION}`;
 
 const PRECACHE = [
@@ -15,9 +15,10 @@ const PRECACHE = [
   './js/core.js',
   './js/store.js',
   './js/db.js',
-  './icons/icon.svg',
+  './icons/icon-32.png',
+  './icons/icon-64.png',
+  './icons/icon-180.png',
   './icons/icon-192.png',
-  './icons/apple-touch-icon.png',
   './icons/icon-512.png',
 ];
 
