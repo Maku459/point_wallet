@@ -3,7 +3,7 @@
  * アプリ本体はキャッシュ優先＋バックグラウンド更新、ページ遷移はネットワーク優先。
  * ポイントデータは localStorage にあるため、ここでは扱わない。
  */
-const VERSION = 'v6';
+const VERSION = 'v7';
 const CACHE_NAME = `point-wallet-${VERSION}`;
 
 const PRECACHE = [
@@ -43,6 +43,28 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
+});
+
+// 失効前の通知をタップしたらアプリを開く（既に開いていればそのウィンドウへ）
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    (async () => {
+      const scope = self.registration.scope;
+      // data.url は自分のページが入れた相対パスだが、念のためスコープ内に丸める
+      const raw = (event.notification.data && event.notification.data.url) || './';
+      const target = new URL(raw, scope);
+      const url = target.href.startsWith(scope) ? target.href : scope;
+
+      const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      const existing = windows.find((client) => client.url.startsWith(scope));
+      if (existing) {
+        await existing.focus();
+        return;
+      }
+      await self.clients.openWindow(url);
+    })(),
+  );
 });
 
 self.addEventListener('fetch', (event) => {

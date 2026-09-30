@@ -6,6 +6,7 @@ import {
   DANGER_DAYS,
   WARN_DAYS,
   backupAgeLabel,
+  buildExpiryNotification,
   expiryLabel,
   filterEntries,
   formatBytes,
@@ -657,9 +658,28 @@ function cycleTheme() {
 /* ---------------- 通知（端末内・アプリ起動時） ---------------- */
 
 const LAST_NOTIFIED_KEY = 'point-wallet:last-notified';
+const NOTIFY_TAG = 'point-wallet-expiry';
+
+const canNotify = () => 'Notification' in window;
+
+function readLastNotified() {
+  try {
+    return localStorage.getItem(LAST_NOTIFIED_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function writeLastNotified(day) {
+  try {
+    localStorage.setItem(LAST_NOTIFIED_KEY, day);
+  } catch (err) {
+    console.warn('通知の記録を保存できませんでした', err);
+  }
+}
 
 async function enableNotifications() {
-  if (!('Notification' in window)) {
+  if (!canNotify()) {
     showToast('このブラウザは通知に対応していません');
     return;
   }
@@ -669,6 +689,11 @@ async function enableNotifications() {
     showToast('失効前の通知をオフにしました');
     return;
   }
+  if (Notification.permission === 'denied') {
+    showToast('ブラウザの設定で通知がブロックされています');
+    return;
+  }
+  // requestPermission はユーザー操作の中でしか通らない（メニューから呼んでいる）
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') {
     showToast('通知が許可されませんでした');
@@ -676,29 +701,75 @@ async function enableNotifications() {
   }
   updateSettings({ notify: true });
   syncNotifyLabel();
-  showToast('アプリを開いたときに、失効が近いポイントをお知らせします');
-  notifyUpcoming();
+  showToast(`アプリを開いたときに、${DANGER_DAYS}日以内に失効するポイントをお知らせします`);
+  // 有効にした直後は「1日1回」を無視して 1 通出し、届くことを確かめられるようにする
+  notifyUpcoming({ force: true });
 }
 
-function notifyUpcoming() {
-  if (!settings.notify || !('Notification' in window) || Notification.permission !== 'granted') return;
-  const today = toISODate();
-  if (localStorage.getItem(LAST_NOTIFIED_KEY) === today) return;
+/**
+ * Service Worker の登録を待つ。登録されない環境では `ready` が永久に保留になるので、
+ * 待ちすぎないよう打ち切って null を返す（呼ぶ側が通知を諦められるようにする）。
+ */
+function swRegistration(timeout = 8000) {
+  if (!('serviceWorker' in navigator)) return Promise.resolve(null);
+  return Promise.race([
+    navigator.serviceWorker.ready.catch(() => null),
+    new Promise((resolve) => {
+      setTimeout(() => resolve(null), timeout);
+    }),
+  ]);
+}
 
-  const urgent = upcomingExpirations(entries, today, DANGER_DAYS);
-  if (urgent.length === 0) return;
-
-  const first = urgent[0];
-  const body =
-    urgent.length === 1
-      ? `${first.site}：${formatNumber(first.points)}（${expiryLabel(first, today)}）`
-      : `${first.site} ほか ${urgent.length - 1} 件が ${DANGER_DAYS} 日以内に失効します`;
-  try {
-    new Notification('まもなく失効するポイントがあります', { body, icon: 'icons/icon-192.png', tag: 'point-wallet-expiry' });
-    localStorage.setItem(LAST_NOTIFIED_KEY, today);
-  } catch (err) {
-    console.warn('通知を表示できませんでした', err);
+/**
+ * 通知を出す。インストールした PWA（Android の Chrome など）では
+ * `new Notification()` が使えないため、Service Worker 経由を優先する。
+ * @returns {Promise<'serviceworker' | 'page' | ''>} 出せた経路（空文字なら出せていない）
+ */
+async function showNotification(title, options) {
+  const registration = await swRegistration();
+  if (registration && typeof registration.showNotification === 'function') {
+    try {
+      await registration.showNotification(title, options);
+      return 'serviceworker';
+    } catch (err) {
+      console.warn('Service Worker 経由で通知を表示できませんでした', err);
+    }
   }
+  try {
+    new Notification(title, options);
+    return 'page';
+  } catch (err) {
+    // Android の Chrome などはここで Illegal constructor になる
+    console.warn('通知を表示できませんでした', err);
+    return '';
+  }
+}
+
+/** 失効間近（既定は DANGER_DAYS＝1週間）のポイントを通知する */
+async function notifyUpcoming({ force = false } = {}) {
+  if (!settings.notify || !canNotify() || Notification.permission !== 'granted') return;
+  const today = toISODate();
+  // 起動のたびに出すと鬱陶しくて切られるので 1 日 1 回に絞る
+  if (!force && readLastNotified() === today) return;
+
+  const notice = buildExpiryNotification(entries, today, DANGER_DAYS);
+  if (!notice) return;
+
+  const via = await showNotification(notice.title, {
+    body: notice.body,
+    icon: './icons/icon-192.png',
+    badge: './icons/icon-64.png',
+    lang: 'ja',
+    // tag を固定しているので、重ねて出しても 1 件に畳まれる
+    tag: NOTIFY_TAG,
+    renotify: true,
+    data: { url: './' },
+  });
+  if (!via) return;
+  // Service Worker から出したものは通知欄に残るが、ページから出したものは読み込み
+  // 直し（初回起動の controllerchange など）で消える。消えたのに「通知した」と
+  // 記録すると、その日は二度と出ないので、記録せず次の起動に譲る。
+  if (via === 'serviceworker' || !('serviceWorker' in navigator)) writeLastNotified(today);
 }
 
 function syncNotifyLabel() {
@@ -780,9 +851,11 @@ el.importFile.addEventListener('change', async () => {
   if (file) await importBackup(file);
 });
 
-// 日付をまたいだ場合に表示を更新する
+// 日付をまたいだ場合に表示を更新し、その日の通知がまだなら出す
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') render();
+  if (document.visibilityState !== 'visible') return;
+  render();
+  notifyUpcoming();
 });
 
 /* ---------------- 起動 ---------------- */

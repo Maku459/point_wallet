@@ -254,6 +254,32 @@ export function upcomingExpirations(entries, today = toISODate(), withinDays = W
   );
 }
 
+/** 通知の本文に並べる件数の上限。これを超えたぶんは「ほか◯件」にまとめる */
+const NOTIFY_LIST_LIMIT = 3;
+
+/**
+ * 失効間近のポイントを知らせる通知の文面を組み立てる。対象が無ければ null。
+ * 通知 API には触らないので、Node のテストからも確かめられる。
+ */
+export function buildExpiryNotification(entries, today = toISODate(), withinDays = DANGER_DAYS) {
+  const urgent = upcomingExpirations(entries, today, withinDays);
+  if (urgent.length === 0) return null;
+
+  const lines = urgent
+    .slice(0, NOTIFY_LIST_LIMIT)
+    .map((entry) => `${entry.site}：${formatNumber(entry.points)}（${expiryLabel(entry, today)}）`);
+  if (urgent.length > NOTIFY_LIST_LIMIT) lines.push(`ほか${urgent.length - NOTIFY_LIST_LIMIT}件`);
+
+  return {
+    title:
+      urgent.length === 1
+        ? 'まもなく失効するポイントがあります'
+        : `${urgent.length}件のポイントが${withinDays}日以内に失効します`,
+    body: lines.join('\n'),
+    count: urgent.length,
+  };
+}
+
 /** バックアップを促すまでの日数 */
 export const BACKUP_STALE_DAYS = 14;
 
