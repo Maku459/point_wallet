@@ -21,7 +21,7 @@
 ## 2026-09-30 失効1週間前の通知を Service Worker から出す (#5)
 
 - 1 週間以内（`DANGER_DAYS`）に失効するポイントの通知を、`new Notification()` ではなく
-  `registration.showNotification()` から出すようにした。ホーム画面に追加した PWA では
+  `registration.showNotification()` から出すようにした（`f6e9e53`）。ホーム画面に追加した PWA では
   コンストラクタが `Illegal constructor` を投げるので、インストールして使う人には
   これまで 1 通も届いていなかった。使えないときだけコンストラクタへ落とす。
   → 知見「通知は Service Worker 経由で出す」
