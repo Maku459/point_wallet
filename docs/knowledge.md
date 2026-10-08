@@ -32,6 +32,7 @@
 | 入力の検証と正規化 | `js/core.js` の `validateEntry`（`sanitizeEntry` もこれを通る） |
 | 編集できる項目（最終更新日を動かすかどうかの判断） | `js/core.js` の `EDITABLE_FIELDS` |
 | 並び替えの種類 | `js/core.js` の `sortEntries` の `comparators` |
+| 失効前の通知の文面 | `js/core.js` の `buildExpiryNotification` |
 | 保存先・永続化要求・自動バックアップ先の保持 | `js/db.js` |
 | 保存／読み出し／バックアップの組み立て | `js/store.js` |
 | 画面の組み立てと操作 | `js/app.js` |
@@ -154,14 +155,33 @@ File System Access API の `FileSystemFileHandle` は構造化複製で IndexedD
 
 ## 通知はアプリを開いたときだけ
 
-サーバーを持たないので push は行わない。`notifyUpcoming()` が起動時に見て、
-7 日以内（`DANGER_DAYS`）に失効するものがあれば出す。
+サーバーを持たないので push は行わない。`notifyUpcoming()` が起動時と
+画面に戻ったときに見て、7 日以内（`DANGER_DAYS`）に失効するものがあれば出す。
 
 - **1 日 1 回に絞る**（localStorage の `point-wallet:last-notified` に日付を入れる）。
-  起動のたびに出すと通知が鬱陶しくなって切られる
+  起動のたびに出すと通知が鬱陶しくなって切られる。開いたまま日付をまたぐ場合に備えて
+  `visibilitychange` でも見に行くが、同じ日なら 2 通目は出ない
 - `Notification.requestPermission()` は**ユーザー操作の中で呼ぶ**。起動直後に呼んでも
   ブラウザが黙って拒否する（メニューの「失効前の通知を有効にする」から呼んでいる）
 - `tag` を固定しているので、同じ端末で重ねて出しても 1 件に畳まれる
+- 文面は `buildExpiryNotification`（`js/core.js`）が組み立てる。通知 API に触らない
+  純粋関数なので Node のテストで確かめられる。件数や文言を変えるならここだけ直す
+
+### 通知は Service Worker 経由で出す
+
+**`new Notification()` を主経路にしない。** ホーム画面に追加した PWA（Android の
+Chrome など）ではコンストラクタが `Illegal constructor` を投げるので、
+インストールして使う人に通知が 1 通も届かない。`registration.showNotification()`
+を先に試し、駄目なときだけコンストラクタへ落とす（`showNotification` が両方を見る）。
+
+- `navigator.serviceWorker.ready` は **Service Worker が登録されない環境では永久に
+  解決しない**（`file://` 直開き、登録が失敗したとき）。`swRegistration()` が
+  タイムアウトと競走させて打ち切るので、そこを外すと通知処理ごと止まる
+- 通知をタップしたときの行き先は `sw.js` の `notificationclick`。開いている
+  ウィンドウがあれば `focus()` し、無ければ `openWindow()` する。スコープ外の
+  URL へ飛ばないよう `registration.scope` で丸めている
+- 出せたときだけ「今日は通知した」と記録する（出せていないのに記録すると、
+  その日はもう通知されない）
 
 ## テスト
 

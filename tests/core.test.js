@@ -3,6 +3,7 @@ import { test, describe } from 'node:test';
 import {
   BACKUP_STALE_DAYS,
   backupAgeLabel,
+  buildExpiryNotification,
   daysSince,
   daysUntil,
   formatBytes,
@@ -192,6 +193,49 @@ describe('集計', () => {
   test('upcomingExpirations は失効済みを含めず期限順に返す', () => {
     const list = upcomingExpirations(entries, TODAY, 30);
     assert.deepEqual(list.map((e) => e.id), ['1']);
+  });
+});
+
+describe('失効前の通知の文面', () => {
+  test('対象が無ければ null', () => {
+    const list = [entry({ expiry: '' }), entry({ expiry: '2026-12-31' }), entry({ expiry: '2026-09-18' })];
+    assert.equal(buildExpiryNotification(list, TODAY), null);
+  });
+
+  test('1件なら期限と残り日数を出す', () => {
+    const notice = buildExpiryNotification([entry({ site: '楽天', points: 1200, expiry: '2026-09-22' })], TODAY);
+    assert.equal(notice.count, 1);
+    assert.equal(notice.title, 'まもなく失効するポイントがあります');
+    assert.equal(notice.body, '楽天：1,200（あと3日）');
+  });
+
+  test('既定は1週間以内だけを拾う', () => {
+    const list = [
+      entry({ id: 'in', site: '今週', expiry: '2026-09-26' }),
+      entry({ id: 'out', site: '来週', expiry: '2026-09-27' }),
+    ];
+    const notice = buildExpiryNotification(list, TODAY);
+    assert.equal(notice.count, 1);
+    assert.match(notice.body, /今週/);
+    assert.doesNotMatch(notice.body, /来週/);
+  });
+
+  test('複数件は期限の近い順に並べ、4件目以降はまとめる', () => {
+    const list = [
+      entry({ id: 'd', site: 'D', expiry: '2026-09-25' }),
+      entry({ id: 'a', site: 'A', expiry: '2026-09-19' }),
+      entry({ id: 'c', site: 'C', expiry: '2026-09-24' }),
+      entry({ id: 'b', site: 'B', expiry: '2026-09-20' }),
+    ];
+    const notice = buildExpiryNotification(list, TODAY);
+    assert.equal(notice.count, 4);
+    assert.equal(notice.title, '4件のポイントが7日以内に失効します');
+    assert.deepEqual(notice.body.split('\n'), [
+      'A：100（本日が期限）',
+      'B：100（明日が期限）',
+      'C：100（あと5日）',
+      'ほか1件',
+    ]);
   });
 });
 
